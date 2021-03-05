@@ -4,6 +4,7 @@ import random
 from collections import deque
 import time
 
+import json
 import gym
 import pybullet_envs
 
@@ -143,12 +144,13 @@ class DenseNetBlock(nn.Module):
             features = self.batch_norm(features)
         features = self.act(features)
         assert features.shape[0] == identity_map.shape[0], "features: {} | identity: {}".format(features.shape, identity_map.shape)
+        #print("FEATURES: {} | STATE: {}".format(features.shape, identity_map.shape))
         features = torch.cat((features, identity_map), dim=1)
         return features
     
     
 class OFENet(nn.Module):
-    def __init__(self, state_size, action_size, target_dim, num_layer=4, hidden_size=40):
+    def __init__(self, state_size, action_size, target_dim, num_layer=4, hidden_size=40, batch_norm=True, activation="SiLU"):
         super(OFENet, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
@@ -163,8 +165,8 @@ class OFENet(nn.Module):
         for i in range(num_layer):
             state_layer += [denseblock(input_nodes=state_size+i*hidden_size,
                                        output_nodes=hidden_size,
-                                       activation="SiLU",
-                                       batch_norm=True)]
+                                       activation=activation,
+                                       batch_norm=batch_norm)]
             
         self.state_layer_block = nn.Sequential(*state_layer)
         self.encode_state_out = state_size + (num_layer) * hidden_size
@@ -173,8 +175,8 @@ class OFENet(nn.Module):
         for i in range(num_layer):
             action_layer += [denseblock(input_nodes=action_block_input+i*hidden_size,
                                        output_nodes=hidden_size,
-                                       activation="SiLU",
-                                       batch_norm=True)]
+                                       activation=activation,
+                                       batch_norm=batch_norm)]
         self.action_layer_block = nn.Sequential(*action_layer)
 
         self.pred_layer = nn.Linear((state_size+(2*num_layer)*hidden_size)+action_size, target_dim)
@@ -243,14 +245,14 @@ def fill_buffer(agent, env, samples=1000):
             state = state.reshape((1, state_size))
     print("Adding random samples to buffer done! Buffer size: ", agent.memory.__len__())
                 
-def pretrain_ofenet(agent, epochs, writer):
+def pretrain_ofenet(agent, epochs, writer, target_dim):
     losses = []
 
     for ep in range(epochs):
         states, actions, rewards, next_states, dones = agent.memory.sample()
         # ---------------------------- update OFENet ---------------------------- #
         pred = agent.ofenet.forward(states, actions)
-        targets = next_states[:,:17]
+        targets = next_states[:,:target_dim]
         ofenet_loss = (targets-pred).pow(2).mean()
         agent.ofenet_optim.zero_grad()
         ofenet_loss.backward()
@@ -265,6 +267,7 @@ class REDQ_Agent():
                  state_size,
                  action_size,
                  replay_buffer,
+                 ofenet=True,
                  target_dim=17,
                  ofenet_layer=8,
                  batch_norm=True,
@@ -287,12 +290,14 @@ class REDQ_Agent():
             action_size (int): dimension of each action
             random_seed (int): random seed
         """
-        self.state_size = state_size
+        feature_size = state_size
         self.action_size = action_size
+        feature_action_size = feature_size+action_size
         self.seed = random.seed(random_seed)
         self.hidden_size = hidden_size
         self.gamma = gamma
         self.tau = tau
+        self.use_ofenet = ofenet
         
         self.target_entropy = -action_size  # -dim(A)
         self.log_alpha = torch.tensor([0.0], requires_grad=True)
@@ -307,19 +312,22 @@ class REDQ_Agent():
         self.M = M # number of target critics that are randomly selected
         self.G = G # Updates per step ~ UTD-ratio
         
-        ofenet_size = 30
-        self.ofenet = OFENet(state_size,
-                             action_size,
-                             target_dim=target_dim,
-                             num_layer=ofenet_layer,
-                             hidden_size=ofenet_size).to(device)
-        # TODO: CHECK ADAM PARAMS WITH TF AND PAPER
-        self.ofenet_optim = optim.Adam(self.ofenet.parameters(), lr=3e-4)  
-        print(self.ofenet)
+        if ofenet:
+            ofenet_size = 30
+            self.ofenet = OFENet(state_size,
+                                action_size,
+                                target_dim=target_dim,
+                                num_layer=ofenet_layer,
+                                hidden_size=ofenet_size,
+                                batch_norm=batch_norm,
+                                activation=activation).to(device)
+            # TODO: CHECK ADAM PARAMS WITH TF AND PAPER
+            self.ofenet_optim = optim.Adam(self.ofenet.parameters(), lr=3e-4)  
+            print(self.ofenet)
 
-        # split state and action ~ weird step but to keep critic inputs consistent
-        feature_size = self.ofenet.get_state_dim()
-        feature_action_size = self.ofenet.get_action_state_dim()
+            # split state and action ~ weird step but to keep critic inputs consistent
+            feature_size = self.ofenet.get_state_dim()
+            feature_action_size = self.ofenet.get_action_state_dim()
         
         # Actor Network 
         self.actor_local = Actor(feature_size, action_size, random_seed, hidden_size=self.hidden_size).to(device)
@@ -352,32 +360,38 @@ class REDQ_Agent():
         actor_loss, critic1_loss, ofenet_loss = 0, 0, 0
         for update in range(self.G):
             if len(self.memory) > self.memory.batch_size:
-                ofenet_loss = self.ofenet.train_ofenet(self.memory.sample(), self.ofenet_optim)
+                if self.use_ofenet:
+                    ofenet_loss = self.ofenet.train_ofenet(self.memory.sample(), self.ofenet_optim)
                 experiences = self.memory.sample()
                 actor_loss, critic1_loss = self.learn(update, experiences)
         return ofenet_loss, actor_loss, critic1_loss # future ofenet_loss
     
     def act(self, state):
         """Returns actions for given state as per current policy."""
+
         state = torch.from_numpy(state).float().to(device)
         self.actor_local.eval()
-        self.ofenet.eval()
+
         with torch.no_grad():
-            state = self.ofenet.get_state_features(state)
+            if self.use_ofenet: 
+                self.ofenet.eval()
+                state = self.ofenet.get_state_features(state)
             action, _, _ = self.actor_local.sample(state)
         self.actor_local.train()
-        self.ofenet.train()
+        if self.use_ofenet: self.ofenet.train()
         return action.detach().cpu()[0]
     
     def eval_(self, state):
         state = torch.from_numpy(state).float().to(device)
         self.actor_local.eval()
-        self.ofenet.eval()
+        
         with torch.no_grad():
-            state = self.ofenet.get_state_features(state)
+            if self.use_ofenet: 
+                self.ofenet.eval()
+                state = self.ofenet.get_state_features(state)
             _, _ , action = self.actor_local.sample(state)
         self.actor_local.train()
-        self.ofenet.train()
+        if self.use_ofenet: self.ofenet.train()
         return action.detach().cpu()[0]
     
     def learn(self, step, experiences):
@@ -403,9 +417,15 @@ class REDQ_Agent():
 
         with torch.no_grad():
             # Get predicted next-state actions and Q values from target models
-            next_state_features = self.ofenet.get_state_features(next_states)
+            if self.use_ofenet:
+                next_state_features = self.ofenet.get_state_features(next_states)
+            else:
+                next_state_features = next_states
             next_action, next_log_prob, _ = self.actor_local.sample(next_state_features)
-            next_state_action_features = self.ofenet.get_state_action_features(next_states, next_action) #get_state_action_features
+            if self.use_ofenet: 
+                next_state_action_features = self.ofenet.get_state_action_features(next_states, next_action) #get_state_action_features
+            else:
+                next_state_action_features = torch.cat((next_states, next_action), dim=1)
             # TODO: make this variable for possible more than tnext_state_action_featureswo target critics
             Q_target1_next = self.target_critics[idx[0]](next_state_action_features)
             Q_target2_next = self.target_critics[idx[1]](next_state_action_features)
@@ -416,7 +436,10 @@ class REDQ_Agent():
         Q_targets = 5.0*rewards.cpu() + (self.gamma * (1 - dones.cpu()) * Q_target_next.cpu())
 
         # Compute critic losses and update critics 
-        state_action_features = self.ofenet.get_state_action_features(states, actions)
+        if self.use_ofenet:
+            state_action_features = self.ofenet.get_state_action_features(states, actions)
+        else:
+            state_action_features = torch.cat((states, actions), dim=1)
         for critic, optim, target in zip(self.critics, self.optims, self.target_critics):
             Q = critic(state_action_features).cpu()
             Q_loss = 0.5*F.mse_loss(Q, Q_targets)
@@ -430,10 +453,16 @@ class REDQ_Agent():
         
         # ---------------------------- update actor ---------------------------- #
         if step == self.G-1:
-            state_features = self.ofenet.get_state_features(states)
+            if self.use_ofenet:
+                state_features = self.ofenet.get_state_features(states)
+            else:
+                state_features = states
             actions_pred, log_prob, _ = self.actor_local.sample(state_features)             
             
-            state_action_features = self.ofenet.get_state_action_features(states, actions_pred)
+            if self.use_ofenet:
+                state_action_features = self.ofenet.get_state_action_features(states, actions_pred)
+            else:
+                state_action_features = torch.cat((states, actions_pred), dim=1)
             # TODO: make this variable for possible more than two critics
             Q1 = self.critics[idx[0]](state_action_features).cpu()
             Q2 = self.critics[idx[0]](state_action_features).cpu()
@@ -629,10 +658,11 @@ parser.add_argument("--ofenet_layer", type=int, default=8,
                     help="Number of dense layer in each (state/action) block of the ofenet network, (default: 8)")
 parser.add_argument("--collect_random", type=int, default=10_000,
                     help="Number of randomly collected transitions to pretrain the OFENet, (default: 10.000)")
-parser.add_argument("--batch_norm", type=bool, default=True,
-                    help="Add batch norm to the OFENet, default: True")
+parser.add_argument("--batch_norm", type=int, default=1, choices=[0,1],
+                    help="Add batch norm to the OFENet, default: 1")
 parser.add_argument("--activation", type=str, default="SiLU", choices=["SiLU", "ReLU"],
                     help="Type of activation function for the ofenet network, choose between SiLU and ReLU, default: SiLU")
+parser.add_argument("--ofenet", type=int, default=1, choices=[0,1], help="Using OFENet feature extractor, default: True")
 
 args = parser.parse_args()
     
@@ -658,6 +688,7 @@ if __name__ == "__main__":
     agent = REDQ_Agent(state_size=state_size,
                 action_size=action_size,
                 replay_buffer=replay_buffer,
+                ofenet=args.ofenet,
                 target_dim=args.target_dim,
                 ofenet_layer=args.ofenet_layer,
                 batch_norm=args.batch_norm,
@@ -676,12 +707,14 @@ if __name__ == "__main__":
     fill_buffer(samples=args.collect_random,
                 agent=agent,
                 env=env)
-    t0 = time.time()
-    agent = pretrain_ofenet(agent=agent,
-                    epochs=args.collect_random,
-                    writer=writer)
-    t1 = time.time()
-    timer(t0, t1, train_type="Pre-Training")
+    if args.ofenet:
+        t0 = time.time()
+        agent = pretrain_ofenet(agent=agent,
+                        epochs=args.collect_random,
+                        writer=writer,
+                        target_dim=args.target_dim)
+        t1 = time.time()
+        timer(t0, t1, train_type="Pre-Training")
 
     t0 = time.time()
     final_average100 = train(steps=args.steps,
