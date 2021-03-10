@@ -81,8 +81,7 @@ class Actor(nn.Module):
         action = torch.tanh(e)
         log_prob = (dist.log_prob(e) - torch.log(1 - action.pow(2) + epsilon)).sum(1, keepdim=True)
 
-        return action, log_prob, torch.tanh(mu)
-        
+        return action, log_prob, torch.tanh(mu)      
 
 class Critic(nn.Module):
     """Critic (Value) Model."""
@@ -117,18 +116,17 @@ class Critic(nn.Module):
     
     
 class DenseNetBlock(nn.Module):
-    def __init__(self, input_nodes, output_nodes, activation, batch_norm=False):
+    def __init__(self, input_nodes, output_nodes, activation, batch_norm=False, device="cpu"):
         super(DenseNetBlock, self).__init__()
-        
-        
+        self.device = device
         self.do_batch_norm = batch_norm
         if batch_norm:
-            self.layer = nn.Linear(input_nodes, output_nodes, bias=True)
+            self.layer = nn.Linear(input_nodes, output_nodes, bias=True).to(device)
             nn.init.xavier_uniform_(self.layer.weight)
             nn.init.zeros_(self.layer.bias)
-            self.batch_norm = nn.BatchNorm1d(output_nodes) #, momentum=0.99, eps=0.001
+            self.batch_norm = nn.BatchNorm1d(output_nodes).to(device) #, momentum=0.99, eps=0.001
         else:
-            self.layer = nn.Linear(input_nodes, output_nodes)
+            self.layer = nn.Linear(input_nodes, output_nodes).to(device)
         if activation == "SiLU":
             self.act = nn.SiLU()
         elif activation == "ReLU":
@@ -136,21 +134,25 @@ class DenseNetBlock(nn.Module):
         else:
             print("Activation Function can not be selected!")
     
-    def forward(self, x):
+    def forward(self, x, trainable):
+
         identity_map = x
         features = self.layer(x)
-
-        if self.do_batch_norm:
+        if trainable == False: 
+            features = features.detach()
+            assert not features.requires_grad
+        
+        if self.do_batch_norm and trainable:
             features = self.batch_norm(features)
         features = self.act(features)
         assert features.shape[0] == identity_map.shape[0], "features: {} | identity: {}".format(features.shape, identity_map.shape)
-        #print("FEATURES: {} | STATE: {}".format(features.shape, identity_map.shape))
+
         features = torch.cat((features, identity_map), dim=1)
         return features
-    
+
     
 class OFENet(nn.Module):
-    def __init__(self, state_size, action_size, target_dim, num_layer=4, hidden_size=40, batch_norm=True, activation="SiLU"):
+    def __init__(self, state_size, action_size, target_dim, num_layer=4, hidden_size=40, batch_norm=True, activation="SiLU", device="cpu"):
         super(OFENet, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
@@ -166,9 +168,10 @@ class OFENet(nn.Module):
             state_layer += [denseblock(input_nodes=state_size+i*hidden_size,
                                        output_nodes=hidden_size,
                                        activation=activation,
-                                       batch_norm=batch_norm)]
+                                       batch_norm=batch_norm,
+                                       device=device)]
             
-        self.state_layer_block = nn.Sequential(*state_layer)
+        self.state_layer_block = state_layer # mySequential(*state_layer)
         self.encode_state_out = state_size + (num_layer) * hidden_size
         action_block_input = self.encode_state_out + action_size
         
@@ -176,43 +179,46 @@ class OFENet(nn.Module):
             action_layer += [denseblock(input_nodes=action_block_input+i*hidden_size,
                                        output_nodes=hidden_size,
                                        activation=activation,
-                                       batch_norm=batch_norm)]
-        self.action_layer_block = nn.Sequential(*action_layer)
+                                       batch_norm=batch_norm,
+                                       device=device)]
+        self.action_layer_block = action_layer # nn.Sequential(*action_layer)
 
         self.pred_layer = nn.Linear((state_size+(2*num_layer)*hidden_size)+action_size, target_dim)
         
     def forward(self, state, action):
         features = state
-        features = self.state_layer_block(features)
+        for layer in self.state_layer_block:
+            features = layer(features, True)
         features = torch.cat((features, action), dim=1)
-        features = self.action_layer_block(features)
+        for layer in self.action_layer_block:
+            features = layer(features, True)
         pred = self.pred_layer(features)
         return pred
     
-    def get_state_features(self, state):
-        self.state_layer_block.eval()
+    def get_state_features(self, state, trainable=False):
         with torch.no_grad():
-            z0 = self.state_layer_block(state)
-        self.state_layer_block.train()
-        return z0
+            for layer in self.state_layer_block:
+                state = layer(state, trainable)
+        return state
     
-    def get_state_action_features(self, state, action):
-        self.state_layer_block.eval()
-        self.action_layer_block.eval()
+    def get_state_action_features(self, state, action, trainable=False):
         with torch.no_grad():
-            z0 = self.state_layer_block(state)
-            action_cat = torch.cat((z0, action), dim=1)
-            z0_a = self.action_layer_block(action_cat)
-        self.state_layer_block.train()
-        self.action_layer_block.train()
-        return z0_a
+            for layer in self.state_layer_block:
+                state = layer(state, trainable)
+            
+        action_cat = torch.cat((state, action), dim=1)
+        
+        for layer in self.action_layer_block:
+            action_cat = layer(action_cat, trainable)
+
+        return action_cat
     
     def train_ofenet(self, experiences, optim):
         states, actions, rewards, next_states, dones = experiences
         # ---------------------------- update OFENet ---------------------------- #
         pred = self.forward(states, actions)
         target_states = next_states[:, :self.target_dim]
-        ofenet_loss = (target_states - pred).pow(2).mean()
+        ofenet_loss = (pred - target_states).pow(2).mean()
         
 
         optim.zero_grad()
@@ -320,7 +326,8 @@ class REDQ_Agent():
                                 num_layer=ofenet_layer,
                                 hidden_size=ofenet_size,
                                 batch_norm=batch_norm,
-                                activation=activation).to(device)
+                                activation=activation,
+                                device=device).to(device)
             # TODO: CHECK ADAM PARAMS WITH TF AND PAPER
             self.ofenet_optim = optim.Adam(self.ofenet.parameters(), lr=3e-4)  
             print(self.ofenet)
@@ -332,7 +339,7 @@ class REDQ_Agent():
         # Actor Network 
         self.actor_local = Actor(feature_size, action_size, random_seed, hidden_size=self.hidden_size).to(device)
         self.actor_optimizer = optim.Adam(self.actor_local.parameters(), lr=lr)     
-        
+                
         # Critic Network (w/ Target Network)
         self.critics = []
         self.target_critics = []
@@ -429,25 +436,26 @@ class REDQ_Agent():
             # TODO: make this variable for possible more than tnext_state_action_featureswo target critics
             Q_target1_next = self.target_critics[idx[0]](next_state_action_features)
             Q_target2_next = self.target_critics[idx[1]](next_state_action_features)
-            
+            assert not next_state_features.requires_grad, "next_state_features have gradient but shouldnt!!"
             # take the min of both critics for updating
             Q_target_next = torch.min(Q_target1_next, Q_target2_next) - self.alpha.to(device) * next_log_prob
 
-        Q_targets = 5.0*rewards.cpu() + (self.gamma * (1 - dones.cpu()) * Q_target_next.cpu())
+        Q_targets = rewards.cpu() + (self.gamma * (1 - dones.cpu()) * Q_target_next.cpu()) # 5.0* (reward_scale)
 
         # Compute critic losses and update critics 
         if self.use_ofenet:
-            state_action_features = self.ofenet.get_state_action_features(states, actions)
+            state_action_features = self.ofenet.get_state_action_features(states, actions).detach()
         else:
             state_action_features = torch.cat((states, actions), dim=1)
+        assert not state_action_features.requires_grad, "State_action_features have gradients but shouldnt!"
         for critic, optim, target in zip(self.critics, self.optims, self.target_critics):
             Q = critic(state_action_features).cpu()
-            Q_loss = 0.5*F.mse_loss(Q, Q_targets)
+            Q_loss = 0.5 * F.mse_loss(Q, Q_targets)
         
             # Update critic
             optim.zero_grad()
             Q_loss.backward()
-            optim.step()
+            optim.step()    
             # soft update of the targets
             self.soft_update(critic, target)
         
@@ -457,17 +465,20 @@ class REDQ_Agent():
                 state_features = self.ofenet.get_state_features(states)
             else:
                 state_features = states
-            actions_pred, log_prob, _ = self.actor_local.sample(state_features)             
+            assert not state_features.requires_grad, "state features have gradients but shouldnt!"
+            actions_pred, log_prob, _ = self.actor_local.sample(state_features)
             
             if self.use_ofenet:
                 state_action_features = self.ofenet.get_state_action_features(states, actions_pred)
             else:
                 state_action_features = torch.cat((states, actions_pred), dim=1)
+            assert state_action_features.requires_grad, "state_action_features should have gradients!"
             # TODO: make this variable for possible more than two critics
-            Q1 = self.critics[idx[0]](state_action_features).cpu()
-            Q2 = self.critics[idx[0]](state_action_features).cpu()
-            Q = torch.min(Q1,Q2)
-            
+
+            Q1 = self.critics[idx[0]](state_action_features)
+            Q2 = self.critics[idx[1]](state_action_features)
+            Q = torch.min(Q1,Q2).cpu()
+             
             actor_loss = (self.alpha * log_prob.cpu() - Q).mean()
             # Optimize the actor loss
             self.actor_optimizer.zero_grad()
@@ -611,7 +622,7 @@ def train(steps, precollected, agent):
             writer.add_scalar("OFENet loss", ofenet_loss, current_step)
             writer.add_scalar("Actor loss", a_loss, current_step)
             writer.add_scalar("Critic loss", c_loss, current_step)
-            print('\rEpisode {} Frame: [{}/{}] Reward: {:.2f}  Average100 Score: {:.2f} ofenet_loss: {:.3f}, a_loss: {:.3f}, c_loss: {:.3f}'.format(i_episode, step, steps, score, np.mean(scores_deque), ofenet_loss, a_loss, c_loss))
+            print('\rEpisode {} Env. Step: [{}/{}] Reward: {:.2f}  Average100 Score: {:.2f} ofenet_loss: {:.3f}, a_loss: {:.3f}, c_loss: {:.3f}'.format(i_episode, step, steps, score, np.mean(scores_deque), ofenet_loss, a_loss, c_loss))
             state = env.reset()
             state = state.reshape((1, state_size))
             score = 0
@@ -634,9 +645,9 @@ parser.add_argument("--M", type=int, default=2,
                     help="Numbe of subsample set of the emsemble for updating the agent, default is 2 (currently only supports 2!)")
 parser.add_argument("--G", type=int, default=1,
                     help="Update-to-Data (UTD) ratio, updates taken per step with the environment, default=20")
-parser.add_argument("--eval_every", type=int, default=1000,
-                    help="Number of interactions after which the evaluation runs are performed, default = 1000")
-parser.add_argument("--eval_runs", type=int, default=3,
+parser.add_argument("--eval_every", type=int, default=10_000,
+                    help="Number of interactions after which the evaluation runs are performed, default = 10.000")
+parser.add_argument("--eval_runs", type=int, default=1,
                     help="Number of evaluation runs performed, default = 1")
 parser.add_argument("--seed", type=int, default=0,
                     help="Seed for the env and torch network weights, default is 0")
