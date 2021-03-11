@@ -144,6 +144,7 @@ class DenseNetBlock(nn.Module):
         
         if self.do_batch_norm and trainable:
             features = self.batch_norm(features)
+            
         features = self.act(features)
         assert features.shape[0] == identity_map.shape[0], "features: {} | identity: {}".format(features.shape, identity_map.shape)
 
@@ -171,7 +172,7 @@ class OFENet(nn.Module):
                                        batch_norm=batch_norm,
                                        device=device)]
             
-        self.state_layer_block = state_layer # mySequential(*state_layer)
+        self.state_layer_block = state_layer 
         self.encode_state_out = state_size + (num_layer) * hidden_size
         action_block_input = self.encode_state_out + action_size
         
@@ -181,7 +182,7 @@ class OFENet(nn.Module):
                                        activation=activation,
                                        batch_norm=batch_norm,
                                        device=device)]
-        self.action_layer_block = action_layer # nn.Sequential(*action_layer)
+        self.action_layer_block = action_layer
 
         self.pred_layer = nn.Linear((state_size+(2*num_layer)*hidden_size)+action_size, target_dim)
         
@@ -726,7 +727,9 @@ if __name__ == "__main__":
                         target_dim=args.target_dim)
         t1 = time.time()
         timer(t0, t1, train_type="Pre-Training")
-
+    # untrained eval run
+    evaluate(0, args.eval_runs)
+    
     t0 = time.time()
     final_average100 = train(steps=args.steps,
                              precollected=args.collect_random,
@@ -736,8 +739,8 @@ if __name__ == "__main__":
     timer(t0, t1)
     
     # save parameter
-    with open('runs/'+args.info+".json", 'w') as f:
-        json.dump(args.__dict__, f, indent=2)
-    hparams = vars(args)
-    metric = {"final average 100 train reward": final_average100}
-    writer.add_hparams(hparams, metric)
+    #with open('runs/'+args.info+".json", 'w') as f:
+    #    json.dump(args.__dict__, f, indent=2)
+    #hparams = vars(args)
+    #metric = {"final average 100 train reward": final_average100}
+    #writer.add_hparams(hparams, metric)
