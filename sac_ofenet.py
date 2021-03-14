@@ -124,9 +124,10 @@ class DenseNetBlock(nn.Module):
             self.layer = nn.Linear(input_nodes, output_nodes, bias=True).to(device)
             nn.init.xavier_uniform_(self.layer.weight)
             nn.init.zeros_(self.layer.bias)
-            self.batch_norm = nn.BatchNorm1d(output_nodes).to(device) #, momentum=0.99, eps=0.001
+            self.batch_norm = nn.BatchNorm1d(output_nodes, momentum=0.99, eps=0.001).to(device) #, momentum=0.99, eps=0.001
         else:
             self.layer = nn.Linear(input_nodes, output_nodes).to(device)
+            
         if activation == "SiLU":
             self.act = nn.SiLU()
         elif activation == "ReLU":
@@ -172,7 +173,7 @@ class OFENet(nn.Module):
                                        batch_norm=batch_norm,
                                        device=device)]
             
-        self.state_layer_block = state_layer 
+        self.state_layer_block = nn.ModuleList(state_layer) 
         self.encode_state_out = state_size + (num_layer) * hidden_size
         action_block_input = self.encode_state_out + action_size
         
@@ -182,7 +183,7 @@ class OFENet(nn.Module):
                                        activation=activation,
                                        batch_norm=batch_norm,
                                        device=device)]
-        self.action_layer_block = action_layer
+        self.action_layer_block = nn.ModuleList(action_layer)
 
         self.pred_layer = nn.Linear((state_size+(2*num_layer)*hidden_size)+action_size, target_dim)
         
@@ -203,10 +204,11 @@ class OFENet(nn.Module):
         return state
     
     def get_state_action_features(self, state, action, trainable=False):
+        
         with torch.no_grad():
             for layer in self.state_layer_block:
                 state = layer(state, trainable)
-            
+        assert not state.requires_grad
         action_cat = torch.cat((state, action), dim=1)
         
         for layer in self.action_layer_block:
@@ -330,6 +332,7 @@ class REDQ_Agent():
                                 activation=activation,
                                 device=device).to(device)
             # TODO: CHECK ADAM PARAMS WITH TF AND PAPER
+
             self.ofenet_optim = optim.Adam(self.ofenet.parameters(), lr=3e-4)  
             print(self.ofenet)
 
@@ -426,12 +429,12 @@ class REDQ_Agent():
         with torch.no_grad():
             # Get predicted next-state actions and Q values from target models
             if self.use_ofenet:
-                next_state_features = self.ofenet.get_state_features(next_states)
+                next_state_features = self.ofenet.get_state_features(next_states).detach()
             else:
                 next_state_features = next_states
             next_action, next_log_prob, _ = self.actor_local.sample(next_state_features)
             if self.use_ofenet: 
-                next_state_action_features = self.ofenet.get_state_action_features(next_states, next_action) #get_state_action_features
+                next_state_action_features = self.ofenet.get_state_action_features(next_states, next_action).detach() #get_state_action_features
             else:
                 next_state_action_features = torch.cat((next_states, next_action), dim=1)
             # TODO: make this variable for possible more than tnext_state_action_featureswo target critics
@@ -463,7 +466,7 @@ class REDQ_Agent():
         # ---------------------------- update actor ---------------------------- #
         if step == self.G-1:
             if self.use_ofenet:
-                state_features = self.ofenet.get_state_features(states)
+                state_features = self.ofenet.get_state_features(states).detach()
             else:
                 state_features = states
             assert not state_features.requires_grad, "state features have gradients but shouldnt!"
@@ -654,7 +657,7 @@ parser.add_argument("--seed", type=int, default=0,
                     help="Seed for the env and torch network weights, default is 0")
 parser.add_argument("--lr", type=float, default=3e-4,
                     help="Actor learning rate of adapting the network weights, default is 3e-4")
-parser.add_argument("--layer_size", type=int, default=401,
+parser.add_argument("--layer_size", type=int, default=256,
                     help="Number of nodes per neural network layer, default is 401")
 parser.add_argument("--replay_memory", type=int, default=int(1e6),
                     help="Size of the Replay memory, default is 1e6")
