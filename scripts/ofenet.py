@@ -1,6 +1,7 @@
 
 import torch
 import torch.nn as nn
+import torch.optim as optim
 from .networks import DenseNetBlock
    
 class DummyRepresentationLearner():
@@ -62,6 +63,7 @@ class OFENet(nn.Module):
         self.action_layer_block = nn.ModuleList(action_layer)
 
         self.pred_layer = nn.Linear((state_size+(2*num_layer)*hidden_size)+action_size, target_dim)
+        self.optim = optim.Adam(params=self.parameters(), lr=3e-4)
         
     def forward(self, state, action):
         features = state
@@ -92,17 +94,16 @@ class OFENet(nn.Module):
 
         return action_cat
     
-    def train_ofenet(self, experiences, optim):
+    def train_ofenet(self, experiences):
         states, actions, rewards, next_states, dones = experiences
         # ---------------------------- update OFENet ---------------------------- #
         pred = self.forward(states, actions)
         target_states = next_states[:, :self.target_dim]
         ofenet_loss = (pred - target_states).pow(2).mean()
-        
 
-        optim.zero_grad()
+        self.optim.zero_grad()
         ofenet_loss.backward()
-        optim.step()
+        self.optim.step()
         return ofenet_loss.item()
     
     def get_action_state_dim(self,):

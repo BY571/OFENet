@@ -25,18 +25,10 @@ def fill_buffer(agent, env, samples=1000):
     print("Adding random samples to buffer done! Buffer size: ", agent.memory.__len__())
                 
 def pretrain_ofenet(agent, epochs, writer, target_dim):
-    losses = []
-
     for ep in range(epochs):
-        states, actions, rewards, next_states, dones = agent.memory.sample()
         # ---------------------------- update OFENet ---------------------------- #
-        pred = agent.ofenet.forward(states, actions)
-        targets = next_states[:,:target_dim]
-        ofenet_loss = (targets-pred).pow(2).mean()
-        agent.ofenet_optim.zero_grad()
-        ofenet_loss.backward()
-        agent.ofenet_optim.step()
-        writer.add_scalar("OFENet-pretrainig-loss", ofenet_loss.item(), ep)
+        ofenet_loss = agent.ofenet.train_ofenet(agent.memory.sample())
+        writer.add_scalar("OFENet-pretrainig-loss", ofenet_loss, ep)
     return agent
 
 def get_target_dim(env_name):

@@ -15,11 +15,7 @@ class REDQ_Agent():
                  state_size,
                  action_size,
                  replay_buffer,
-                 ofenet=True,
-                 target_dim=17,
-                 ofenet_layer=8,
-                 batch_norm=True,
-                 activation="SiLU",
+                 ofenet,
                  lr=3e-4,
                  hidden_size=401,
                  random_seed=0,
@@ -61,24 +57,10 @@ class REDQ_Agent():
         self.M = M # number of target critics that are randomly selected
         self.G = G # Updates per step ~ UTD-ratio
         
-        if ofenet:
-            ofenet_size = 30
-            self.ofenet = OFENet(state_size,
-                                action_size,
-                                target_dim=target_dim,
-                                num_layer=ofenet_layer,
-                                hidden_size=ofenet_size,
-                                batch_norm=batch_norm,
-                                activation=activation,
-                                device=device).to(device)
-            # TODO: CHECK ADAM PARAMS WITH TF AND PAPER
-
-            self.ofenet_optim = optim.Adam(self.ofenet.parameters(), lr=3e-4, eps=1e-07)  
-            print(self.ofenet)
-
-            # split state and action ~ weird step but to keep critic inputs consistent
-            feature_size = self.ofenet.get_state_dim()
-            feature_action_size = self.ofenet.get_action_state_dim()
+        # split state and action ~ weird step but to keep critic inputs consistent
+        self.ofenet = ofenet
+        feature_size = self.ofenet.get_state_dim()
+        feature_action_size = self.ofenet.get_action_state_dim()
         
         # Actor Network 
         self.actor_local = Actor(feature_size, action_size, random_seed, hidden_size=self.hidden_size).to(device)
@@ -112,7 +94,7 @@ class REDQ_Agent():
         for update in range(self.G):
             if len(self.memory) > self.memory.batch_size:
                 if self.use_ofenet:
-                    ofenet_loss = self.ofenet.train_ofenet(self.memory.sample(), self.ofenet_optim)
+                    ofenet_loss = self.ofenet.train_ofenet(self.memory.sample())
                 experiences = self.memory.sample()
                 actor_loss, critic1_loss = self.learn(update, experiences)
         return ofenet_loss, actor_loss, critic1_loss # future ofenet_loss

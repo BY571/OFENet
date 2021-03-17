@@ -102,7 +102,7 @@ class DenseNetBlock(nn.Module):
             self.layer = nn.Linear(input_nodes, output_nodes, bias=True).to(device)
             nn.init.xavier_uniform_(self.layer.weight)
             nn.init.zeros_(self.layer.bias)
-            self.batch_norm = nn.BatchNorm1d(output_nodes, momentum=0.99, eps=0.001).to(device) #, momentum=0.99, eps=0.001
+            self.batch_norm = nn.BatchNorm1d(output_nodes).to(device) #, momentum=0.99, eps=0.001
         else:
             self.layer = nn.Linear(input_nodes, output_nodes).to(device)
             

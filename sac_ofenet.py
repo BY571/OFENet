@@ -22,6 +22,7 @@ import wandb
 from scripts.utils import timer, fill_buffer, pretrain_ofenet, get_target_dim
 from scripts.replay_buffer import ReplayBuffer
 from scripts.agent import REDQ_Agent
+from scripts.ofenet import OFENet, DummyRepresentationLearner
 
 
 
@@ -153,14 +154,33 @@ if __name__ == "__main__":
     target_dim = get_target_dim(args.env)
 
     replay_buffer = ReplayBuffer(action_size, state_size, args.replay_memory, args.batch_size, seed, device)
+    
+    if args.ofenet:
+        ofenet_size = 30
+        ofenet = OFENet(state_size,
+                            action_size,
+                            target_dim=target_dim,
+                            num_layer=args.ofenet_layer,
+                            hidden_size=ofenet_size,
+                            batch_norm=args.batch_norm,
+                            activation=args.activation,
+                            device=device).to(device)
+        print(ofenet)
+    else:
+        ofenet_size = 30
+        DummyRepresentationLearner(state_size,
+                            action_size,
+                            target_dim=target_dim,
+                            num_layer=args.ofenet_layer,
+                            hidden_size=ofenet_size,
+                            batch_norm=args.batch_norm,
+                            activation=args.activation,
+                            device=device).to(device)
+        
     agent = REDQ_Agent(state_size=state_size,
                 action_size=action_size,
                 replay_buffer=replay_buffer,
-                ofenet=args.ofenet,
-                target_dim=target_dim,
-                ofenet_layer=args.ofenet_layer,
-                batch_norm=args.batch_norm,
-                activation=args.activation,
+                ofenet=ofenet,
                 random_seed=seed,
                 lr=args.lr,
                 hidden_size=args.layer_size,
