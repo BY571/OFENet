@@ -6,7 +6,17 @@ PyTorch implementation of the [OFENet Paper](https://arxiv.org/abs/2003.01629).
 
 If you might be interested in the work check out the notebook. Currently it is not working as described in the paper, if you find errors or bugs feel free to let me know or correct them. 
 
+# Environment Setup
 
+1. run: 'conda create -n OFENet python=3.7'
+2. enter the environment with 'conda activate OFENet'
+3 run the installation the requirement.txt file with: 'pip install -r requirement.txt'
+
+# To run 
+
+To run one experiment simply type: 'python sac_ofenet.py'
+
+All results are logged with tensorboard: 'tensorboard --logdir=runs'
 
 ## TODO:
 - fix hyperparameter saving bug
