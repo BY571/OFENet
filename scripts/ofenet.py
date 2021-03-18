@@ -12,6 +12,12 @@ class DummyRepresentationLearner():
         self.num_layer = num_layer
         self.target_dim = target_dim
         
+    def eval(self, ):
+        pass
+    
+    def train(self, ):
+        pass
+        
     def forward(self, state, action):
         return torch.randn((state[0],self.target_dim))
     
@@ -21,8 +27,8 @@ class DummyRepresentationLearner():
     def get_state_action_features(self, state, action):
         return torch.cat((state, action), dim=1)
 
-    def train_ofenet(self, experiences, optim):
-        pass
+    def train_ofenet(self, experiences):
+        return 0.0
 
     def get_action_state_dim(self,):
         return (self.state_size+self.action_size)
@@ -64,7 +70,7 @@ class OFENet(nn.Module):
 
         self.pred_layer = nn.Linear((state_size+(2*num_layer)*hidden_size)+action_size, target_dim)
         self.optim = optim.Adam(params=self.parameters(), lr=3e-4)
-        
+    
     def forward(self, state, action):
         features = state
         for layer in self.state_layer_block:
@@ -76,15 +82,15 @@ class OFENet(nn.Module):
         return pred
     
     def get_state_features(self, state):
-
-        for layer in self.state_layer_block:
-            state = layer(state, trainable=False)
+        with torch.no_grad():
+            for layer in self.state_layer_block:
+                state = layer(state, trainable=False)
         return state
     
     def get_state_action_features(self, state, action):
-        
-        for layer in self.state_layer_block:
-            state = layer(state, trainable=False)
+        with torch.no_grad():
+            for layer in self.state_layer_block:
+                state = layer(state, trainable=False)
         assert not state.requires_grad
         
         action_cat = torch.cat((state, action), dim=1)

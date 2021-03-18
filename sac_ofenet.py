@@ -168,14 +168,14 @@ if __name__ == "__main__":
         print(ofenet)
     else:
         ofenet_size = 30
-        DummyRepresentationLearner(state_size,
+        ofenet = DummyRepresentationLearner(state_size,
                             action_size,
                             target_dim=target_dim,
                             num_layer=args.ofenet_layer,
                             hidden_size=ofenet_size,
                             batch_norm=args.batch_norm,
                             activation=args.activation,
-                            device=device).to(device)
+                            device=device)
         
     agent = REDQ_Agent(state_size=state_size,
                 action_size=action_size,

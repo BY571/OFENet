@@ -42,7 +42,6 @@ class REDQ_Agent():
         self.hidden_size = hidden_size
         self.gamma = gamma
         self.tau = tau
-        self.use_ofenet = ofenet
         
         self.target_entropy = -action_size  # -dim(A)
         self.log_alpha = torch.tensor([0.0], requires_grad=True)
@@ -93,8 +92,7 @@ class REDQ_Agent():
         actor_loss, critic1_loss, ofenet_loss = 0, 0, 0
         for update in range(self.G):
             if len(self.memory) > self.memory.batch_size:
-                if self.use_ofenet:
-                    ofenet_loss = self.ofenet.train_ofenet(self.memory.sample())
+                ofenet_loss = self.ofenet.train_ofenet(self.memory.sample())
                 experiences = self.memory.sample()
                 actor_loss, critic1_loss = self.learn(update, experiences)
         return ofenet_loss, actor_loss, critic1_loss # future ofenet_loss
@@ -106,12 +104,11 @@ class REDQ_Agent():
         self.actor_local.eval()
 
         with torch.no_grad():
-            if self.use_ofenet: 
-                self.ofenet.eval()
-                state = self.ofenet.get_state_features(state)
+
+            self.ofenet.eval()
+            state = self.ofenet.get_state_features(state)
             action, _, _ = self.actor_local.sample(state)
         self.actor_local.train()
-        if self.use_ofenet: self.ofenet.train()
         return action.detach().cpu()[0]
     
     def eval_(self, state):
@@ -119,12 +116,11 @@ class REDQ_Agent():
         self.actor_local.eval()
         
         with torch.no_grad():
-            if self.use_ofenet: 
-                self.ofenet.eval()
-                state = self.ofenet.get_state_features(state)
+
+            self.ofenet.eval()
+            state = self.ofenet.get_state_features(state)
             _, _ , action = self.actor_local.sample(state)
         self.actor_local.train()
-        if self.use_ofenet: self.ofenet.train()
         return action.detach().cpu()[0]
     
     def learn(self, step, experiences):
@@ -150,15 +146,12 @@ class REDQ_Agent():
 
         with torch.no_grad():
             # Get predicted next-state actions and Q values from target models
-            if self.use_ofenet:
-                next_state_features = self.ofenet.get_state_features(next_states).detach()
-            else:
-                next_state_features = next_states
+
+            next_state_features = self.ofenet.get_state_features(next_states).detach()
             next_action, next_log_prob, _ = self.actor_local.sample(next_state_features)
-            if self.use_ofenet: 
-                next_state_action_features = self.ofenet.get_state_action_features(next_states, next_action).detach() #get_state_action_features
-            else:
-                next_state_action_features = torch.cat((next_states, next_action), dim=1)
+            
+            next_state_action_features = self.ofenet.get_state_action_features(next_states, next_action).detach() #get_state_action_features
+
             # TODO: make this variable for possible more than tnext_state_action_featureswo target critics
             Q_target1_next = self.target_critics[idx[0]](next_state_action_features)
             Q_target2_next = self.target_critics[idx[1]](next_state_action_features)
@@ -169,10 +162,9 @@ class REDQ_Agent():
         Q_targets = 5.0 * rewards.cpu() + (self.gamma * (1 - dones.cpu()) * Q_target_next.cpu()) # 5.0* (reward_scale)
 
         # Compute critic losses and update critics 
-        if self.use_ofenet:
-            state_action_features = self.ofenet.get_state_action_features(states, actions).detach()
-        else:
-            state_action_features = torch.cat((states, actions), dim=1)
+
+        state_action_features = self.ofenet.get_state_action_features(states, actions).detach()
+
         assert not state_action_features.requires_grad, "State_action_features have gradients but shouldnt!"
         for critic, optim, target in zip(self.critics, self.optims, self.target_critics):
             Q = critic(state_action_features).cpu()
@@ -187,17 +179,15 @@ class REDQ_Agent():
         
         # ---------------------------- update actor ---------------------------- #
         if step == self.G-1:
-            if self.use_ofenet:
-                state_features = self.ofenet.get_state_features(states).detach()
-            else:
-                state_features = states
+
+            state_features = self.ofenet.get_state_features(states).detach()
+
             assert not state_features.requires_grad, "state features have gradients but shouldnt!"
             actions_pred, log_prob, _ = self.actor_local.sample(state_features)
             
-            if self.use_ofenet:
-                state_action_features = self.ofenet.get_state_action_features(states, actions_pred)
-            else:
-                state_action_features = torch.cat((states, actions_pred), dim=1)
+
+            state_action_features = self.ofenet.get_state_action_features(states, actions_pred)
+
             assert state_action_features.requires_grad, "state_action_features should have gradients!"
             # TODO: make this variable for possible more than two critics
 
