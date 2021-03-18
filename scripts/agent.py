@@ -5,7 +5,7 @@ import torch.optim as optim
 from .networks import Actor, Critic
 from .ofenet import OFENet
 import torch.nn.functional as F
-
+from torch.nn.utils import clip_grad_norm_
 
 
 class REDQ_Agent():
@@ -78,7 +78,6 @@ class REDQ_Agent():
             target = Critic(feature_action_size, i, hidden_size=self.hidden_size).to(device)
             self.target_critics.append(target)
 
-
         # Replay memory
         self.memory = replay_buffer
         
@@ -147,10 +146,10 @@ class REDQ_Agent():
         with torch.no_grad():
             # Get predicted next-state actions and Q values from target models
 
-            next_state_features = self.ofenet.get_state_features(next_states).detach()
+            next_state_features = self.ofenet.get_state_features(next_states)
             next_action, next_log_prob, _ = self.actor_local.sample(next_state_features)
             
-            next_state_action_features = self.ofenet.get_state_action_features(next_states, next_action).detach() #get_state_action_features
+            next_state_action_features = self.ofenet.get_state_action_features(next_states, next_action) #get_state_action_features
 
             # TODO: make this variable for possible more than tnext_state_action_featureswo target critics
             Q_target1_next = self.target_critics[idx[0]](next_state_action_features)
@@ -160,11 +159,10 @@ class REDQ_Agent():
             Q_target_next = torch.min(Q_target1_next, Q_target2_next) - self.alpha.to(next_action.device) * next_log_prob
 
         Q_targets = 5.0 * rewards.cpu() + (self.gamma * (1 - dones.cpu()) * Q_target_next.cpu()) # 5.0* (reward_scale)
-
+        assert not Q_targets.requires_grad, "Q_targets have gradients but shouldnt!"
         # Compute critic losses and update critics 
 
-        state_action_features = self.ofenet.get_state_action_features(states, actions).detach()
-
+        state_action_features = self.ofenet.get_state_action_features(states, actions)
         assert not state_action_features.requires_grad, "State_action_features have gradients but shouldnt!"
         for critic, optim, target in zip(self.critics, self.optims, self.target_critics):
             Q = critic(state_action_features).cpu()
@@ -173,6 +171,7 @@ class REDQ_Agent():
             # Update critic
             optim.zero_grad()
             Q_loss.backward()
+            # add clip gradients?
             optim.step()    
             # soft update of the targets
             self.soft_update(critic, target)
@@ -180,12 +179,11 @@ class REDQ_Agent():
         # ---------------------------- update actor ---------------------------- #
         if step == self.G-1:
 
-            state_features = self.ofenet.get_state_features(states).detach()
+            state_features = self.ofenet.get_state_features(states)
 
             assert not state_features.requires_grad, "state features have gradients but shouldnt!"
             actions_pred, log_prob, _ = self.actor_local.sample(state_features)
             
-
             state_action_features = self.ofenet.get_state_action_features(states, actions_pred)
 
             assert state_action_features.requires_grad, "state_action_features should have gradients!"
@@ -199,6 +197,7 @@ class REDQ_Agent():
             # Optimize the actor loss
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
+            # add clip gradients? 
             self.actor_optimizer.step()
 
             # Compute alpha loss 
