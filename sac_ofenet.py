@@ -145,7 +145,7 @@ if __name__ == "__main__":
     target_dim = get_target_dim(args.env)
 
     replay_buffer = ReplayBuffer(action_size, state_size, args.replay_memory, args.batch_size, seed, device)
-    
+    print("HERE0")
     if args.ofenet:
         ofenet_size = 30
         extractor = OFENet(state_size,
@@ -166,7 +166,7 @@ if __name__ == "__main__":
                             batch_norm=args.batch_norm,
                             activation=args.activation,
                             device=device)
-        
+    print("HERE1")
     agent = REDQ_Agent(state_size=state_size,
                 action_size=action_size,
                 replay_buffer=replay_buffer,
@@ -181,7 +181,7 @@ if __name__ == "__main__":
                 N=args.N,
                 M=args.M,
                 G=args.G)
-
+    print("HERE2")
     fill_buffer(samples=args.collect_random,
                 agent=agent,
                 env=env)

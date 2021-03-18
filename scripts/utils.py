@@ -8,8 +8,11 @@ def timer(start,end, train_type="Training"):
 
 def fill_buffer(agent, env, samples=1000):
     collected_samples = 0
+    print("HERE3")
     state_size = env.observation_space.shape[0]
-    state = env.reset()
+    print("HERE4")
+    state = env.reset() 
+    print("HERE5")
     state = state.reshape((1, state_size))
     for i in range(samples):
             
