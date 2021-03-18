@@ -1,24 +1,15 @@
 
 import numpy as np
-import random
+import pybullet_envs
 from collections import deque
-import time
-
+import argparse
+import torch
 import json
 import gym
-import pybullet_envs
+import time
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-from torch.distributions import Normal, MultivariateNormal
-
-import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-import argparse
-import matplotlib.pyplot as plt
-import wandb
+
 from scripts.utils import timer, fill_buffer, pretrain_ofenet, get_target_dim
 from scripts.replay_buffer import ReplayBuffer
 from scripts.agent import REDQ_Agent
@@ -157,7 +148,7 @@ if __name__ == "__main__":
     
     if args.ofenet:
         ofenet_size = 30
-        ofenet = OFENet(state_size,
+        extractor = OFENet(state_size,
                             action_size,
                             target_dim=target_dim,
                             num_layer=args.ofenet_layer,
@@ -165,14 +156,13 @@ if __name__ == "__main__":
                             batch_norm=args.batch_norm,
                             activation=args.activation,
                             device=device).to(device)
-        print(ofenet)
+        print(extractor)
     else:
-        ofenet_size = 30
-        ofenet = DummyRepresentationLearner(state_size,
+        extractor = DummyRepresentationLearner(state_size,
                             action_size,
                             target_dim=target_dim,
                             num_layer=args.ofenet_layer,
-                            hidden_size=ofenet_size,
+                            hidden_size=30,
                             batch_norm=args.batch_norm,
                             activation=args.activation,
                             device=device)
@@ -180,7 +170,7 @@ if __name__ == "__main__":
     agent = REDQ_Agent(state_size=state_size,
                 action_size=action_size,
                 replay_buffer=replay_buffer,
-                ofenet=ofenet,
+                ofenet=extractor,
                 random_seed=seed,
                 lr=args.lr,
                 hidden_size=args.layer_size,
