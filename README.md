@@ -8,15 +8,15 @@ If you might be interested in the work check out the notebook. Currently it is n
 
 # Environment Setup
 
-1. run: 'conda create -n OFENet python=3.7'
-2. enter the environment with 'conda activate OFENet'
-3 run the installation the requirement.txt file with: 'pip install -r requirement.txt'
+1. run: `conda create -n OFENet python=3.7`
+2. enter the environment with `conda activate OFENet`
+3 run the installation the requirement.txt file with: `pip install -r requirement.txt`
 
 # To run 
 
-To run one experiment simply type: 'python sac_ofenet.py'
+To run one experiment simply type: `python sac_ofenet.py`
 
-All results are logged with tensorboard: 'tensorboard --logdir=runs'
+All results are logged with tensorboard to check them type: `tensorboard --logdir=runs`
 
 ## TODO:
 - fix hyperparameter saving bug
