@@ -94,7 +94,7 @@ class REDQ_Agent():
                 ofenet_loss = self.ofenet.train_ofenet(self.memory.sample())
                 experiences = self.memory.sample()
                 actor_loss, critic1_loss = self.learn(update, experiences)
-        return ofenet_loss, actor_loss, critic1_loss # future ofenet_loss
+        return ofenet_loss, actor_loss, critic1_loss
     
     def act(self, state):
         """Returns actions for given state as per current policy."""
@@ -103,7 +103,6 @@ class REDQ_Agent():
         self.actor_local.eval()
 
         with torch.no_grad():
-
             self.ofenet.eval()
             state = self.ofenet.get_state_features(state)
             action, _, _ = self.actor_local.sample(state)
@@ -115,7 +114,6 @@ class REDQ_Agent():
         self.actor_local.eval()
         
         with torch.no_grad():
-
             self.ofenet.eval()
             state = self.ofenet.get_state_features(state)
             _, _ , action = self.actor_local.sample(state)
@@ -148,8 +146,7 @@ class REDQ_Agent():
 
             next_state_features = self.ofenet.get_state_features(next_states)
             next_action, next_log_prob, _ = self.actor_local.sample(next_state_features)
-            
-            next_state_action_features = self.ofenet.get_state_action_features(next_states, next_action) #get_state_action_features
+            next_state_action_features = self.ofenet.get_state_action_features(next_states, next_action)
 
             # TODO: make this variable for possible more than tnext_state_action_featureswo target critics
             Q_target1_next = self.target_critics[idx[0]](next_state_action_features)
