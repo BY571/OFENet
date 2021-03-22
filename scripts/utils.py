@@ -31,7 +31,6 @@ def pretrain_ofenet(agent, epochs, writer, target_dim):
         # ---------------------------- update OFENet ---------------------------- #
         ofenet_loss = agent.ofenet.train_ofenet(agent.memory.sample())
         writer.add_scalar("OFENet-pretrainig-loss", ofenet_loss, ep)
-    return agent
 
 def get_target_dim(env_name):
     TARGET_DIM_DICT = {

@@ -115,6 +115,7 @@ parser.add_argument("-g", "--gamma", type=float, default=0.99,
                     help="discount factor gamma, default is 0.99")
 parser.add_argument("--ofenet_layer", type=int, default=8,
                     help="Number of dense layer in each (state/action) block of the ofenet network, (default: 8)")
+parser.add_argument("--ofenet_size", type=int, default=30, help="Size of each Dense-Layer, (default: 30)")
 parser.add_argument("--collect_random", type=int, default=10_000,
                     help="Number of randomly collected transitions to pretrain the OFENet, (default: 10.000)")
 parser.add_argument("--batch_norm", type=int, default=1, choices=[0,1],
@@ -147,12 +148,11 @@ if __name__ == "__main__":
     replay_buffer = ReplayBuffer(action_size, state_size, args.replay_memory, args.batch_size, seed, device)
 
     if args.ofenet:
-        ofenet_size = 30
         extractor = OFENet(state_size,
                             action_size,
                             target_dim=target_dim,
                             num_layer=args.ofenet_layer,
-                            hidden_size=ofenet_size,
+                            hidden_size=args.ofenet_size,
                             batch_norm=args.batch_norm,
                             activation=args.activation,
                             device=device).to(device)
@@ -187,7 +187,7 @@ if __name__ == "__main__":
                 env=env)
     if args.ofenet:
         t0 = time.time()
-        agent = pretrain_ofenet(agent=agent,
+        pretrain_ofenet(agent=agent,
                         epochs=args.collect_random,
                         writer=writer,
                         target_dim=target_dim)
